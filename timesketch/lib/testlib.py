@@ -20,9 +20,11 @@ import json
 import six
 
 from flask_testing import TestCase
+from flask import abort
 
 from timesketch import create_app
 from timesketch.lib.definitions import HTTP_STATUS_CODE_REDIRECT
+from timesketch.lib.definitions import HTTP_STATUS_CODE_NOT_FOUND
 from timesketch.models import init_db
 from timesketch.models import drop_all
 from timesketch.models import db_session
@@ -79,6 +81,9 @@ class MockElasticClient(object):
 
 class MockDataStore(object):
     """A mock implementation of a Datastore."""
+    #A list of event dictionaries
+    event_store = []
+
     event_dict = {
         '_index': [],
         '_id': 'adc123',
@@ -166,14 +171,21 @@ class MockDataStore(object):
             return 4711
         return self.search_result_dict
 
-    # pylint: disable=arguments-differ,unused-argument
-    def get_event(self, *args, **kwargs):
+    def get_event(self, searchindex_id, event_id, store_events=False):
         """Mock returning a single event from the datastore.
 
         Returns:
             A dictionary with event data.
         """
-        return self.event_dict
+        if not store_events:
+            return self.event_dict
+
+        for event in self.event_store:
+            if event['_id'] == event_id:
+                return event
+
+        abort(HTTP_STATUS_CODE_NOT_FOUND)
+
 
     def set_label(self,
                   searchindex_id,
@@ -190,6 +202,25 @@ class MockDataStore(object):
     def create_index(self, *args, **kwargs):
         """Mock creating an index."""
         return
+
+    def import_event(self, index_name, event_type, event=None,
+            event_id=None, flush_interval=None):
+        """Mock add event to Elasticsearch."""
+
+        for e in self.event_store:
+                if e['_id'] == event_id:
+                    e['_source'].update(event)
+                    return
+        
+        new_event = {
+            '_index': index_name,
+            '_id': event_id,
+            '_type': event_type,
+            '_source': event
+        }
+
+        self.event_store.append(new_event)
+
 
     @property
     def version(self):
